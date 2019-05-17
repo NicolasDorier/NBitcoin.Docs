@@ -428,3 +428,68 @@ Now this solution is not an improvement over the previous `"Alice sends through 
 * How do your prevent address reuse?
 
 However, can you feel the power of having signed a transaction without relying on any software?
+
+# NBXplorer design
+
+So here are the problem we wish to solve that got problematic in the part `"Alice sends through Bob without Bitcoin RPC"`:
+* How to handle block reorgs?
+* How to handle malleated transactions or double spent?
+* How do your prevent address reuse?
+
+We will use for this a middleware called [NBXplorer](https://github.com/dgarage/NBXplorer/).
+The description says:
+
+> A minimalist UTXO tracker for HD Wallets. The goal is to have a flexible, .NET based UTXO tracker for HD wallets. The explorer supports P2SH,P2PKH,P2WPKH,P2WSH and Multi-sig derivation.
+
+It has an easy to use [API](https://github.com/dgarage/NBXplorer/blob/master/docs/API.md), and can run on pruned node.
+
+It is however important to understand how NBXplorer has been designed so you get a better understanding on what you can do with it.
+Also, in some case, you might want to do your own UTXO tracker and you may be interested in its design.
+
+NBXplorer just connect to a trusted bitcoin full node. 
+
+Alice will first ask to NBXplorer to track her [HD public key](https://programmingblockchain.gitbook.io/programmingblockchain/key_generation/bip_32).
+
+NBXplorer, will then generate all the scriptPubKey along `0/x`, `1/x` and `x` path, and save them in database.
+
+When NBXplorer receives a transaction (within a block or not), it will check all if any input or output match any scriptPubKey it is tracking.
+
+If it match a tracked scriptPubKey of Alice, then NBXplorer will just add this transaction (along with blockHash if any), to the list of Alice's transactions.
+
+Because NBXplorer has all the transactions of Alice, it can reconstruct the UTXO set of Alice quite easily!
+
+When you query the UTXO set from NBXplorer retrieves all the transactions from Alice.
+
+If a transaction was spotted in a block, and that this block is not part of the main chain anymore (reorg), NBXplorer will remove this transaction from the list.
+
+From the resulting list of transaction you can easily build this model:
+
+* A green dot is an output.
+* A gray rectangle is a transaction.
+* An arrow from an output to a transaction indicate it is getting spent by another transaction.
+* Orange arrows indicate a case of double spending.
+
+![](images/UTXO-Construction1.png)
+
+Because the transactions form a acyclic graph, you can create a list which represent the nodes of this graph in a topological ordered way. (If transaction A depends on transaction B, then A will be above B in the list)
+
+But what about the double spending case? Which transaction should be in that list? `17b3b3` or `ab3922`?
+
+The answer is easy: the transaction which arrived last is the most likely to be confirmed eventually. This is because NBXplorer is connected to your trusted full node and your full node would never relay a transaction which conflict with another having more chance to be accepted by miners.
+
+Assuming `ab3922` arrived last, we can make our list.
+
+![](images/UTXO-Construction2.png)
+
+
+Each time you play a transaction, it makes a modification to the UTXO set.
+
+![](images/UTXO-Construction3.png)
+
+So basically, from the transactions, we could calculate that Alice has 4 UTXOs available to spend: `d`,`f`,`j` and `k`.
+
+Designing a wallet tracker in such way make it easy to handle reorgs. It has also the following advantages:
+
+* To restore the UTXO set of an existing wallet, NBXplorer does not have to rescan the whole blockchain, it can just scan Bitcoin's UTXO set. (from Bitcoin's core `scantxoutset`)
+* A wallet UTXO set is prunable. Notice that if we delete `73bdee` from our UTXO set, we will compute exactly the same UTXO set at `ab3922`, so we can handle big wallets.
+* No complicated logic to handle reorgs, indexing is insert only.
