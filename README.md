@@ -742,9 +742,7 @@ namespace NBitcoinTraining
         (KeyPath KeyPath, Coin Coin)[] GetUTXOs()
         {
             var utxos = new Dictionary<OutPoint, (KeyPath KeyPath, Coin Coin)>();
-            var sortedTrackedTransactions = trackedTransactions.Values.TopologicalSort(
-                            getKey: t => t.Transaction.GetHash(),
-                            dependsOn: t => t.Transaction.Inputs.Select(i => i.PrevOut.Hash).ToArray()).ToList();
+            var sortedTrackedTransactions = trackedTransactions.Values.ToList();
 
             List<TrackedTransaction> removedTransactions = new List<TrackedTransaction>();
 
@@ -805,9 +803,15 @@ namespace NBitcoinTraining
                 trackedTransactions.Remove((removed.BlockHash, removed.Transaction.GetHash()), out _);
             }
 
+            // Topological sort
+            sortedTrackedTransactions = sortedTrackedTransactions.TopologicalSort(
+                            getKey: t => t.Transaction.GetHash(),
+                            dependsOn: t => t.Transaction.Inputs.Select(i => i.PrevOut.Hash).ToArray()).ToList();
+
             // Calculate the UTXO set
             foreach (var trackedTx in sortedTrackedTransactions)
             {
+                System.Console.WriteLine("Processing " + trackedTx.Transaction.GetHash() + " " + trackedTx.BlockHash);
                  if (!trackedTx.Transaction.IsCoinBase)
                 {
                     foreach (var input in trackedTx.Transaction.Inputs)
@@ -887,8 +891,9 @@ namespace NBitcoinTraining
 												Func<T, IEnumerable<TDepend>> dependsOn)
         {
             List<T> result = new List<T>();
+            var allKeys = nodes.Select(n => getKey(n));
 			var elems = nodes.ToDictionary(node => node,
-										   node => new HashSet<TDepend>(dependsOn(node)));
+										   node => new HashSet<TDepend>(dependsOn(node).Where(n => allKeys.Contains(n))));
 			while(elems.Count > 0)
 			{
 				var elem = elems.FirstOrDefault(x => x.Value.Count == 0);
@@ -908,4 +913,19 @@ namespace NBitcoinTraining
         }
     }
 }
+```
+
+And our output is as expected:
+
+```
+Alice get money from miner
+Mine a block and check that alice is now synched with the miner (same block height)
+Received TX 60ec882fb997437af4d8301d050f7c00976aa3362382f5ec1e45c8261164e1e5 confirmed
+Alice Balance: 20.00000000
+Alice send 1 BTC to bob
+TX Created 7a7b83260565646219c362255718f61cd9ef73ca4f4e3398d56b73d50fd8e220
+Alice mine her own transaction
+Received TX 7a7b83260565646219c362255718f61cd9ef73ca4f4e3398d56b73d50fd8e220 confirmed
+Alice Balance: 18.99990000
+Bob Balance: 1.00000000
 ```
