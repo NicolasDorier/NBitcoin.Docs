@@ -18,8 +18,8 @@ NBitcoin is a tool I use everyday for other projects, be it closed source projec
 The process is about:
 * Add a new feature on NBitcoin
 * Use such feature for another project
-* Finding what is hard to use on NBitcoin
-* Fixing NBitcoin to have better idea
+* Finding the paint point of using this feature
+* Fixing NBitcoin to make the use case easier to code
 
 This feedback loop sometimes take 10 min. This is why NBitcoin has today 604 releases.
 
