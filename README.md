@@ -1,4 +1,4 @@
-# Introduction {#introduction}
+# Introduction
 
 What a long road. I started writing NBitcoin in 2014 in order to learn about Bitcoin, this was being done by copy and pasting code from BitcoinJ and Bitcoin Core, along with their test suite and making sure it worked in .NET.
 
