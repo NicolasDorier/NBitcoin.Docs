@@ -875,7 +875,7 @@ namespace NBitcoinTraining
 }
 ```
 
-Our topolical sort code is (`TopologicalSort.cs`):
+Our topological sort code is (`TopologicalSort.cs`):
 
 ```csharp
 using System;
