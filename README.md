@@ -491,5 +491,421 @@ So basically, from the transactions, we could calculate that Alice has 4 UTXOs a
 Designing a wallet tracker in such way make it easy to handle reorgs. It has also the following advantages:
 
 * To restore the UTXO set of an existing wallet, NBXplorer does not have to rescan the whole blockchain, it can just scan Bitcoin's UTXO set. (from Bitcoin's core `scantxoutset`)
-* A wallet transaction list is prunable. Notice that if we delete `73bdee` from our database, we will compute exactly the same UTXO set at `ab3922`, so we can handle big wallets.
+* A wallet transaction list is prunable. Notice that if we delete `73bdee` from our database, we will compute exactly the same UTXO set at `ab3922`. This mean that even if your wallet has a huge number of transaction and performance slow done, you can just prune this transaction list.
 * No complicated logic to handle reorgs, indexing is insert only.
+
+# NBXplorer design in a nutshell
+
+If you wanted to do your own wallet tracker (without relying on NBXplorer), how would it looks like?
+
+Basically we want almost the same code than the first part `"Alice sends through Bob with Bitcoin RPC"` but instead of using Bitcoin core RPC wallet, we want to use our own wallet based on simplification of NBXplorer design.
+
+In summary, replacing `RPCClient` calls to our own `Wallet` class calls.
+
+```diff
+diff --git a/Program.cs b/Program.cs
+index 144a0a3..9bd1b84 100644
+--- a/Program.cs
++++ b/Program.cs
+@@ -28,29 +28,31 @@ namespace NBitcoinTraining
+                 Console.WriteLine("Generate 101 blocks so miner can spend money");
+                 var minerRPC = miner.CreateRPCClient();
+                 miner.Generate(101);
++
++                var aliceWallet = new Wallet(alice.CreateNodeClient());
++                aliceWallet.Listen();
+
+-                var aliceRPC = alice.CreateRPCClient();
+                 var bobRPC = bob.CreateRPCClient();
+                 var bobAddress = bobRPC.GetNewAddress();
+
+                 Console.WriteLine("Alice get money from miner");
+-                var aliceAddress = aliceRPC.GetNewAddress();
++                var aliceAddress = aliceWallet.GetNewAddress();
+                 minerRPC.SendToAddress(aliceAddress, Money.Coins(20m));
+
+                 Console.WriteLine("Mine a block and check that alice is now synched with the miner (same block height)");
+                 minerRPC.Generate(1);
+-                alice.Sync(miner);
++                aliceWallet.Sync(miner);
+
+-                Console.WriteLine($"Alice Balance: {aliceRPC.GetBalance()}");
++                Console.WriteLine($"Alice Balance: {aliceWallet.GetBalance()}");
+
+                 Console.WriteLine("Alice send 1 BTC to bob");
+-                aliceRPC.SendToAddress(bobAddress, Money.Coins(1.0m));
++                aliceWallet.SendToAddress(bobAddress, Money.Coins(1.0m));
+                 Console.WriteLine($"Alice mine her own transaction");
+-                aliceRPC.Generate(1);
++                alice.CreateRPCClient().Generate(1);
+
+-                alice.Sync(bob);
++                aliceWallet.Sync(bob);
+
+-                Console.WriteLine($"Alice Balance: {aliceRPC.GetBalance()}");
++                Console.WriteLine($"Alice Balance: {aliceWallet.GetBalance()}");
+                 Console.WriteLine($"Bob Balance: {bobRPC.GetBalance()}");
+             }
+         }
+```
+
+Program.cs:
+
+```csharp
+using System;
+using System.Threading;
+using NBitcoin;
+using NBitcoin.Tests;
+
+namespace NBitcoinTraining
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            // During the first run, this will take time to run, as it download bitcoin core binaries (more than 40MB)
+            using (var env = NodeBuilder.Create(NodeDownloadData.Bitcoin.v0_18_0, Network.RegTest))
+            {
+                // Removing node logs from output
+                env.ConfigParameters.Add("printtoconsole", "0");
+
+                var alice = env.CreateNode();
+                var bob = env.CreateNode();
+                var miner = env.CreateNode();
+                env.StartAll();
+                Console.WriteLine("Created 3 nodes (alice, bob, miner)");
+
+                Console.WriteLine("Connect nodes to each other");
+                miner.Sync(alice, true);
+                miner.Sync(bob, true);
+
+                Console.WriteLine("Generate 101 blocks so miner can spend money");
+                var minerRPC = miner.CreateRPCClient();
+                miner.Generate(101);
+
+                var aliceWallet = new Wallet(alice.CreateNodeClient());
+                aliceWallet.Listen();
+                
+                var bobRPC = bob.CreateRPCClient();
+                var bobAddress = bobRPC.GetNewAddress();
+
+                Console.WriteLine("Alice get money from miner");
+                var aliceAddress = aliceWallet.GetNewAddress();
+                minerRPC.SendToAddress(aliceAddress, Money.Coins(20m));
+
+                Console.WriteLine("Mine a block and check that alice is now synched with the miner (same block height)");
+                minerRPC.Generate(1);
+                aliceWallet.Sync(miner);
+
+                Console.WriteLine($"Alice Balance: {aliceWallet.GetBalance()}");
+
+                Console.WriteLine("Alice send 1 BTC to bob");
+                aliceWallet.SendToAddress(bobAddress, Money.Coins(1.0m));
+                Console.WriteLine($"Alice mine her own transaction");
+                alice.CreateRPCClient().Generate(1);
+
+                aliceWallet.Sync(bob);
+
+                Console.WriteLine($"Alice Balance: {aliceWallet.GetBalance()}");
+                Console.WriteLine($"Bob Balance: {bobRPC.GetBalance()}");
+            }
+        }
+    }
+}
+```
+
+So, what should be `Wallet.cs` implementation which just connect to alice's trusted node? Surprisingly simple: 300 lines of code.
+
+This wallet support reorg, conflict and do not reuse addresses.
+
+Of course, this wallet is missing lot's of feature like persistence, but this show you how you can use `NBitcoin` to connect to the P2P network and do your minimalist wallet.
+
+```csharp
+using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Threading;
+using NBitcoin;
+using NBitcoin.Protocol;
+using NBitcoin.Protocol.Behaviors;
+using NBitcoin.Tests;
+
+namespace NBitcoinTraining
+{
+    // DISCLAIMER: THIS CODE HAS NOT BEEN TESTED THROUGHTFULLY AND SHOULD ONLY
+    // BE USED FOR EDUCATIONAL PURPOSE
+    public class Wallet
+    {
+        public class TrackedAddress
+        {
+            public Script ScriptPubKey { get; set; }
+            public KeyPath KeyPath { get; set; }
+        }
+        public class TrackedTransaction
+        {
+            public uint256 BlockHash { get; set; }
+            public Transaction Transaction { get; set; }
+            public DateTimeOffset Timestamp { get; set; }
+        }
+        Node trustedNode;
+        SlimChain headerChain;
+
+        BitcoinExtKey aliceKey;
+        KeyPath nextAddressPath = new KeyPath(0);
+
+        Network network => trustedNode.Network;
+        ConcurrentDictionary<Script, TrackedAddress> trackedAddresses = new ConcurrentDictionary<Script, TrackedAddress>();
+        ConcurrentDictionary<(uint256 BlockId, uint256 TransactionId), TrackedTransaction> trackedTransactions = new ConcurrentDictionary<(uint256 BlockId, uint256 TransactionId), TrackedTransaction>();
+
+
+        public Wallet(Node trustedNode)
+        {
+            this.trustedNode = trustedNode;
+            this.aliceKey = new ExtKey().GetWif(trustedNode.Network);
+        }
+
+        public void Listen()
+        {
+            // This make sure headerChain has all the block headers of the remote node
+            headerChain = this.trustedNode.GetSlimChain();
+            // This make sure headerChain has all the block headers of the remote node, and keep in sync!
+            this.trustedNode.Behaviors.Add(new SlimChainBehavior(headerChain));
+            this.trustedNode.MessageReceived += OnMessageReceived;
+        }
+
+        private void OnMessageReceived(Node node, IncomingMessage message)
+        {
+            if (message.Message.Payload is BlockPayload blockPayload)
+            {
+                var blockHash = blockPayload.Object.GetHash();
+                foreach (var tx in blockPayload.Object.Transactions)
+                {
+                    CheckTx(blockHash, tx);
+                }
+            }
+            if (message.Message.Payload is TxPayload txPayload)
+            {
+                CheckTx(null, txPayload.Object);
+            }
+            if (message.Message.Payload is InvPayload inv)
+            {
+                // They announce some txid or blockhash, let's ask full data
+                node.SendMessageAsync(new GetDataPayload(inv.ToArray()));
+            }
+        }
+
+        internal void Sync(CoreNode bob)
+        {
+            var rpc = bob.CreateRPCClient();
+            while (rpc.GetBestBlockHash() != headerChain.Tip)
+            {
+                Thread.Sleep(100);
+            }
+        }
+
+        private void CheckTx(uint256 blockHash, Transaction tx)
+        {
+            if(!IsMyTx(tx))
+                return;
+            var confirmed = blockHash == null ? "unconfirmed" : "confirmed";
+            System.Console.WriteLine($"Received TX {tx.GetHash()} {confirmed}");
+            var tracked = new TrackedTransaction()
+            {
+                Transaction = tx,
+                Timestamp = DateTimeOffset.UtcNow,
+                BlockHash = blockHash
+            };
+            trackedTransactions.TryAdd((blockHash, tx.GetHash()), tracked);
+        }
+
+        bool IsMyTx(Transaction tx)
+        {
+            if (!tx.IsCoinBase)
+            {
+                foreach (var input in tx.Inputs)
+                {
+                    var signerScriptPubKey = input.ScriptSig.GetSigner()?.ScriptPubKey;
+                    if (signerScriptPubKey != null && trackedAddresses.ContainsKey(signerScriptPubKey))
+                        return true;
+                }
+            }
+            foreach (var output in tx.Outputs)
+            {
+                if(trackedAddresses.ContainsKey(output.ScriptPubKey))
+                    return true;
+            }
+            return false;
+        }
+
+        (KeyPath KeyPath, Coin Coin)[] GetUTXOs()
+        {
+            var utxos = new Dictionary<OutPoint, (KeyPath KeyPath, Coin Coin)>();
+            var sortedTrackedTransactions = trackedTransactions.Values.TopologicalSort(
+                            getKey: t => t.Transaction.GetHash(),
+                            dependsOn: t => t.Transaction.Inputs.Select(i => i.PrevOut.Hash).ToArray()).ToList();
+
+            List<TrackedTransaction> removedTransactions = new List<TrackedTransaction>();
+
+            foreach (var trackedTx in sortedTrackedTransactions.Where(t => t.BlockHash != null).ToList())
+            {
+                if (headerChain.TryGetHeight(trackedTx.BlockHash, out var height))
+                {
+                    // Let's remove transactions which are immature (coinbase without 101 conf
+                    if (trackedTx.Transaction.IsCoinBase)
+                    {
+                        var confs = headerChain.Height - height + 1;
+                        if (confs < 101)
+                            // This tx will be eventually spendable, let's not remove from DB
+                            sortedTrackedTransactions.Remove(trackedTx);
+                    }
+                }
+                else
+                {
+                    // Let's remove transactions which are confirmed in orphan block
+                    sortedTrackedTransactions.Remove(trackedTx);
+                    removedTransactions.Add(trackedTx);
+                }
+            }
+             // Let's remove transactions who appear both conf and unconf
+            foreach (var trackedTx in sortedTrackedTransactions.Where(t => t.BlockHash != null).ToList())
+            {
+                if(trackedTransactions.TryRemove((null, trackedTx.Transaction.GetHash()), out var removed))
+                {
+                    sortedTrackedTransactions.Remove(removed);
+                    removedTransactions.Add(removed);
+                }
+            }
+            // Let's remove conflict among unconf transactions
+            retry:
+            Dictionary<OutPoint, TrackedTransaction> spent = new Dictionary<OutPoint, TrackedTransaction>();
+            foreach (var trackedTx in sortedTrackedTransactions.Where(t => t.BlockHash == null).ToList())
+            {
+                foreach (var input in trackedTx.Transaction.Inputs)
+                {
+                    var hasConflict = !spent.TryAdd(input.PrevOut, trackedTx);
+                    if (hasConflict)
+                    {
+                        var conflictedTx = spent[input.PrevOut];
+                        if (conflictedTx.Timestamp < trackedTx.Timestamp)
+                        {
+                            // trackedTx is younger, let's remove the conflictedTx from the list and start over
+                            sortedTrackedTransactions.Remove(conflictedTx);
+                            removedTransactions.Add(conflictedTx);
+                            goto retry;
+                        }
+                    }
+                }
+            }
+
+            // Let's clean the removed transactions so they don't appear during next request
+            foreach (var removed in removedTransactions)
+            {
+                trackedTransactions.Remove((removed.BlockHash, removed.Transaction.GetHash()), out _);
+            }
+
+            // Calculate the UTXO set
+            foreach (var trackedTx in sortedTrackedTransactions)
+            {
+                 if (!trackedTx.Transaction.IsCoinBase)
+                {
+                    foreach (var input in trackedTx.Transaction.Inputs)
+                    {
+                        utxos.Remove(input.PrevOut);
+                    }
+                }
+                foreach (var output in trackedTx.Transaction.Outputs.AsCoins())
+                {
+                    if(trackedAddresses.TryGetValue(output.ScriptPubKey, out var trackedAddress))
+                    {
+                        utxos.TryAdd(output.Outpoint, (trackedAddress.KeyPath, output));
+                    }
+                }
+            }
+            return utxos.Values.ToArray();
+        }
+
+        public void SendToAddress(BitcoinAddress address, Money amount)
+        {
+            var utxos = GetUTXOs();
+            var change = GetNewAddress();
+            var builder = network.CreateTransactionBuilder();
+            builder.AddCoins(utxos.Select(u => u.Coin).ToArray());
+            builder.AddKeys(utxos.Select(u => aliceKey.Derive(u.KeyPath)).ToArray());
+            builder.Send(address, amount);
+            builder.SetChange(change);
+            builder.SendFees(Money.Coins(0.0001m));
+            var tx = builder.BuildTransaction(true);
+            using (var listener = trustedNode.CreateListener())
+            {
+                trustedNode.SendMessageAsync(new InvPayload(tx)); // Anounce the tx
+                listener.ReceivePayload<GetDataPayload>();  // wait the node ask for it
+                trustedNode.SendMessageAsync(new TxPayload(tx)); // Broadcast
+
+                // Old trick to be sure the trustedNode processed our transaction
+                trustedNode.SendMessageAsync(new PingPayload());
+                listener.ReceivePayload<PongPayload>();
+            }
+            System.Console.WriteLine($"TX Created {tx.GetHash()}");
+            trackedTransactions.TryAdd((null, tx.GetHash()), new TrackedTransaction()
+            {
+               Timestamp = DateTimeOffset.UtcNow,
+               Transaction = tx
+            });
+        }
+
+        public Money GetBalance()
+        {
+            return GetUTXOs().Select(c => c.Coin.TxOut.Value).Sum();
+        }
+
+        public BitcoinAddress GetNewAddress()
+        {
+            var address = aliceKey.Derive(nextAddressPath).GetPublicKey().GetAddress(ScriptPubKeyType.Legacy, network);
+            trackedAddresses.TryAdd(address.ScriptPubKey, new TrackedAddress() { ScriptPubKey = address.ScriptPubKey, KeyPath = nextAddressPath });
+            nextAddressPath = nextAddressPath.Increment();
+            return address;
+        }
+    }
+}
+```
+
+Our topolical sort code is (`TopologicalSort.cs`):
+
+```csharp
+using System;
+using System.Linq;
+using System.Collections.Generic;
+
+namespace NBitcoinTraining
+{
+    public static class TopologicalSortExtensions
+    {
+        public static IEnumerable<T> TopologicalSort<T, TDepend>(this IEnumerable<T> nodes,
+                                                Func<T, TDepend> getKey,
+												Func<T, IEnumerable<TDepend>> dependsOn)
+        {
+            List<T> result = new List<T>();
+			var elems = nodes.ToDictionary(node => node,
+										   node => new HashSet<TDepend>(dependsOn(node)));
+			while(elems.Count > 0)
+			{
+				var elem = elems.FirstOrDefault(x => x.Value.Count == 0);
+				if(elem.Key == null)
+				{
+					//cycle detected can't order
+					return nodes;
+				}
+				elems.Remove(elem.Key);
+				foreach(var selem in elems)
+				{
+					selem.Value.Remove(getKey(elem.Key));
+				}
+				result.Add(elem.Key);
+			}
+			return result;
+        }
+    }
+}
+```
