@@ -766,7 +766,7 @@ namespace NBitcoinTraining
                     removedTransactions.Add(trackedTx);
                 }
             }
-             // Let's remove transactions who appear both conf and unconf
+             // Let's remove unconf transactions who appear both conf and unconf
             foreach (var trackedTx in sortedTrackedTransactions.Where(t => t.BlockHash != null).ToList())
             {
                 if(trackedTransactions.TryRemove((null, trackedTx.Transaction.GetHash()), out var removed))
