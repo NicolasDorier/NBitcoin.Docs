@@ -462,7 +462,7 @@ When you query the UTXO set from NBXplorer retrieves all the transactions from A
 
 If a transaction was spotted in a block, and that this block is not part of the main chain anymore (reorg), NBXplorer will remove this transaction from the list.
 
-From the resulting list of transaction you can easily build this model:
+From the resulting list of transaction you can easily build this transaction graph:
 
 * A green dot is an output.
 * A gray rectangle is a transaction.
