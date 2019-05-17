@@ -491,5 +491,5 @@ So basically, from the transactions, we could calculate that Alice has 4 UTXOs a
 Designing a wallet tracker in such way make it easy to handle reorgs. It has also the following advantages:
 
 * To restore the UTXO set of an existing wallet, NBXplorer does not have to rescan the whole blockchain, it can just scan Bitcoin's UTXO set. (from Bitcoin's core `scantxoutset`)
-* A wallet UTXO set is prunable. Notice that if we delete `73bdee` from our UTXO set, we will compute exactly the same UTXO set at `ab3922`, so we can handle big wallets.
+* A wallet transaction list is prunable. Notice that if we delete `73bdee` from our database, we will compute exactly the same UTXO set at `ab3922`, so we can handle big wallets.
 * No complicated logic to handle reorgs, indexing is insert only.
