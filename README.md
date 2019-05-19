@@ -7,7 +7,7 @@ As I learned about Bitcoin, I started writing [Programming The Blockchain in C#]
 
 Since then lot's of community member improved the book, that's the beauty of github.
 
-If you want to learn conceptually about Bitcoin, I advice you to read [Programming The Blockchain in C#](https://programmingblockchain.gitbooks.io/programmingblockchain/content/) first before reading this documentation.
+If you want to learn conceptually about Bitcoin, I advise you to read [Programming The Blockchain in C#](https://programmingblockchain.gitbooks.io/programmingblockchain/content/) first before reading this documentation.
 
 [Programming The Blockchain in C#](https://programmingblockchain.gitbooks.io/programmingblockchain/content/) introduces you primitive concept of Bitcoin which are useful whichever language you end up writing bitcoin.
 
@@ -23,7 +23,7 @@ The process is about:
 
 This feedback loop sometimes take 10 min. This is why NBitcoin has today 604 releases.
 
-This mean that you can be sure that NBitcoin is the easiest library to use for bitcoin development. If it was not, I would shot myself in the foot.
+This means that you can be sure that NBitcoin is the easiest library to use for bitcoin development. If it was not, I would shoot myself in the foot.
 
 This book will allow me to explain the design of NBitcoin which has been shaped by my direct experience into using NBitcoin.
 
@@ -195,7 +195,7 @@ This will output the following:
 Created 3 nodes (alice, bob, miner)
 Connect nodes to each other
 Generate 101 blocks so miner can spend money
-Alice get money from miner
+Alice gets money from miner
 Mine a block and check that alice is now synched with the miner (same block height)
 Alice Balance: 20.00000000
 Alice send 1 BTC to bob
@@ -207,7 +207,7 @@ Bob Balance: 1.00000000
 We encourage you to run this example several time, try to play with the code.
 One trick you will often see is that when `Alice` send money to Bob, she mines her own transaction and make sure Bob is aware of this block.
 
-This is done this way because when Alice create a transaction, it would take time to propagate to `Bob`, so we would need to put some sleep in the code. Instead, we just get `Alice` to mine her own transaction and make sure `Bob` received it. Then we can be sure the balance has been updated.
+This is done this way because when Alice creates a transaction, it would take time to propagate to `Bob`, so we would need to put some sleep in the code. Instead, we just get `Alice` to mine her own transaction and make sure `Bob` received it. Then we can be sure the balance has been updated.
 
 You will use this trick a lot during your development.
 
@@ -425,7 +425,7 @@ In the rest of this book, we might hard code `Network.RegTest`, but keep in mind
 # Alice sends through Bob without RPC
 
 In the previous section, we saw how `Alice` can send to `Bob` with the `NBitcoin.TestFramework` library.
-This is all well and good, but in many cases, Bitcoin RPC can be very limited and inflexible in term of feature.
+This is all well and good, but in many cases, Bitcoin RPC can be very limited and inflexible in terms of features.
 
 So let's try to achieve the same goal as in the previous chapter, but this time, without using RPC on Alice's side.
 
@@ -657,7 +657,7 @@ It has an easy to use [API](https://github.com/dgarage/NBXplorer/blob/master/doc
 It is however important to understand how NBXplorer has been designed so you get a better understanding on what you can do with it.
 Also, in some case, you might want to do your own UTXO tracker and you may be interested in its design.
 
-NBXplorer just connect to a trusted bitcoin full node. 
+NBXplorer just connects to a trusted bitcoin full node. 
 
 Alice will first ask to NBXplorer to track her [HD public key](https://programmingblockchain.gitbook.io/programmingblockchain/key_generation/bip_32).
 
@@ -669,11 +669,11 @@ If it match a tracked scriptPubKey of Alice, then NBXplorer will just add this t
 
 Because NBXplorer has all the transactions of Alice, it can reconstruct the UTXO set of Alice quite easily!
 
-When you query the UTXO set from NBXplorer retrieves all the transactions from Alice.
+When you query the UTXO set from NBXplorer it retrieves all the transactions from Alice.
 
 If a transaction was spotted in a block, and that this block is not part of the main chain anymore (reorg), NBXplorer will remove this transaction from the list.
 
-From the resulting list of transaction you can easily build this transaction graph:
+From the resulting list of transactions you can easily build this transaction graph:
 
 * A green dot is an output.
 * A gray rectangle is a transaction.
