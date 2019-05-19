@@ -482,7 +482,7 @@ Assuming `ab3922` arrived last, we can make our list.
 ![](images/UTXO-Construction2.png)
 
 
-Each time you play a transaction, it makes a modification to the UTXO set. (Read from bottom to the top)
+Each transactions is basically a modification to the UTXO set. By reading from the oldest transaction to the newest (from bottom to the top), you can see the reconstruction of the UTXO set.
 
 ![](images/UTXO-Construction3.png)
 
