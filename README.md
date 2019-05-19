@@ -757,7 +757,7 @@ namespace NBitcoinTraining
 
         (KeyPath KeyPath, Coin Coin)[] GetUTXOs()
         {
-            var _TxById = new Dictionary<uint256, AnnotatedTransaction>();
+            var transactionsById = new Dictionary<uint256, AnnotatedTransaction>();
 
             List<TrackedTransaction> ignoredTransactions = new List<TrackedTransaction>();
 
@@ -774,13 +774,13 @@ namespace NBitcoinTraining
 				}
 
 				var annotatedTransaction = new AnnotatedTransaction(txHeight, trackedTx, isMature);
-				if (_TxById.TryGetValue(trackedTx.Transaction.GetHash(), out var conflicted))
+				if (transactionsById.TryGetValue(trackedTx.Transaction.GetHash(), out var conflicted))
 				{
 					if (ShouldReplace(annotatedTransaction, conflicted))
 					{
 						ignoredTransactions.Add(conflicted.TrackedTransaction);
-						_TxById.Remove(trackedTx.Transaction.GetHash());
-						_TxById.Add(trackedTx.Transaction.GetHash(), annotatedTransaction);
+						transactionsById.Remove(trackedTx.Transaction.GetHash());
+						transactionsById.Add(trackedTx.Transaction.GetHash(), annotatedTransaction);
 					}
 					else
 					{
@@ -789,13 +789,13 @@ namespace NBitcoinTraining
 				}
 				else
 				{
-					_TxById.Add(trackedTx.Transaction.GetHash(), annotatedTransaction);
+					transactionsById.Add(trackedTx.Transaction.GetHash(), annotatedTransaction);
 				}
 			}
 
             // Let's resolve the double spents
 			Dictionary<OutPoint, uint256> spentBy = new Dictionary<OutPoint, uint256>();
-			foreach (var annotatedTransaction in _TxById.Values.Where(r => r.Height is int))
+			foreach (var annotatedTransaction in transactionsById.Values.Where(r => r.Height is int))
 			{
 				foreach (var spent in annotatedTransaction.TrackedTransaction.SpentOutpoints)
 				{
@@ -807,12 +807,12 @@ namespace NBitcoinTraining
             List<AnnotatedTransaction> replacedTransactions = new List<AnnotatedTransaction>();
             removeConflicts:
 			HashSet<uint256> conflicts = new HashSet<uint256>();
-			foreach (var annotatedTransaction in _TxById.Values.Where(r => r.Height is null))
+			foreach (var annotatedTransaction in transactionsById.Values.Where(r => r.Height is null))
 			{
 				foreach (var spent in annotatedTransaction.TrackedTransaction.SpentOutpoints)
 				{
 					if (spentBy.TryGetValue(spent, out var conflictHash) &&
-						_TxById.TryGetValue(conflictHash, out var conflicted))
+						transactionsById.TryGetValue(conflictHash, out var conflicted))
 					{
 						if (conflicted == annotatedTransaction)
 							goto nextTransaction;
@@ -858,7 +858,7 @@ namespace NBitcoinTraining
 			}
 
 			foreach (var e in conflicts)
-				_TxById.Remove(e);
+				transactionsById.Remove(e);
 			if (conflicts.Count != 0)
 				goto removeConflicts;
 
@@ -869,7 +869,7 @@ namespace NBitcoinTraining
             }
 
             // Topological sort
-            var sortedTrackedTransactions = _TxById.Values.TopologicalSort(
+            var sortedTrackedTransactions = transactionsById.Values.TopologicalSort(
                 dependsOn: t => t.TrackedTransaction.SpentOutpoints.Select(o => o.Hash), 
                 getKey: t => t.TrackedTransaction.TransactionHash);
 
@@ -1039,3 +1039,16 @@ Received TX 7a7b83260565646219c362255718f61cd9ef73ca4f4e3398d56b73d50fd8e220 con
 Alice Balance: 18.99990000
 Bob Balance: 1.00000000
 ```
+
+The essence of the way NBXplorer is tracking UTXOs and generating addresses is entirely contained in this 300 lines of code `Wallet.cs` class.
+
+NBXplorer add more on top of it:
+* Can pass arguments via environment variable, command line or configuration file
+* Automatically reconnect to your node if the connection goes temporarily down
+* An easy to use REST API
+* Persistence (via in-file no-SQL datbase called DBreeze)
+* Connect via RPC to broadcast transaction instead of using the P2P protocol like this example
+* Connect via RPC to your trusted node to get the proper fee rate.
+* Altcoin support
+
+But all of this can be developped with pure .NET skills and do not involve NBitcoin knowledge, so we won't cover it. We will see about Altcoin support later on.
