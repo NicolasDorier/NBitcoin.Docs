@@ -477,7 +477,7 @@ But what about the double spending case? Which transaction should be in that lis
 
 The answer is easy: the transaction which arrived last is the most likely to be confirmed eventually. This is because NBXplorer is connected to your trusted full node and your full node would never relay a transaction which conflict with another having more chance to be accepted by miners.
 
-Assuming `ab3922` arrived last, we can make our list.
+Assuming `ab3922` arrived last, we can remove `17b3b3` from the list before making our topological sort.
 
 ![](images/UTXO-Construction2.png)
 
