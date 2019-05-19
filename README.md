@@ -1060,5 +1060,6 @@ NBXplorer add more on top of it:
 * Pruning of transaction data (in practice, we don't need to save the whole transaction, only the spent outpoint and received coin for the wallet)
 * Multi-wallet
 * Flexible address generation schemes (multisig, segwit, legacy etc...)
+* Pruning for big wallets (Removal of tracked transaction which do not impact the resulting UTXO set)
 
 But all of this can be developped with pure .NET skills and do not involve `NBitcoin` knowledge, so we won't cover it. We will see about Altcoin support later on.
