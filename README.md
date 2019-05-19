@@ -648,6 +648,8 @@ namespace NBitcoinTraining
             public uint256 BlockHash { get; set; }
             public Transaction Transaction { get; set; }
             public DateTimeOffset Timestamp { get; set; }
+            public uint256 TransactionHash { get; set; }
+            public IEnumerable<OutPoint> SpentOutpoints => Transaction.IsCoinBase ? Array.Empty<OutPoint>() : Transaction.Inputs.Select(i => i.PrevOut);
         }
         Node trustedNode;
         SlimChain headerChain;
@@ -657,7 +659,7 @@ namespace NBitcoinTraining
 
         Network network => trustedNode.Network;
         ConcurrentDictionary<Script, TrackedAddress> trackedAddresses = new ConcurrentDictionary<Script, TrackedAddress>();
-        ConcurrentDictionary<(uint256 BlockId, uint256 TransactionId), TrackedTransaction> trackedTransactions = new ConcurrentDictionary<(uint256 BlockId, uint256 TransactionId), TrackedTransaction>();
+        ConcurrentDictionary<uint256, TrackedTransaction> trackedTransactions = new ConcurrentDictionary<uint256, TrackedTransaction>();
 
 
         public Wallet(Node trustedNode)
@@ -714,10 +716,11 @@ namespace NBitcoinTraining
             var tracked = new TrackedTransaction()
             {
                 Transaction = tx,
+                TransactionHash = tx.GetHash(),
                 Timestamp = DateTimeOffset.UtcNow,
                 BlockHash = blockHash
             };
-            trackedTransactions.TryAdd((blockHash, tx.GetHash()), tracked);
+            trackedTransactions.TryAdd(tracked.TransactionHash, tracked);
         }
 
         bool IsMyTx(Transaction tx)
@@ -739,87 +742,148 @@ namespace NBitcoinTraining
             return false;
         }
 
+        class AnnotatedTransaction
+        {
+            public AnnotatedTransaction(int? height, TrackedTransaction transaction, bool isMature)
+            {
+                Height = height;
+                TrackedTransaction = transaction;
+                IsMature = isMature;
+            }
+            public int? Height { get; set; }
+            public TrackedTransaction TrackedTransaction { get; set; }
+            public bool IsMature { get; set; }
+        }
+
         (KeyPath KeyPath, Coin Coin)[] GetUTXOs()
         {
-            var utxos = new Dictionary<OutPoint, (KeyPath KeyPath, Coin Coin)>();
-            var sortedTrackedTransactions = trackedTransactions.Values.ToList();
+            var _TxById = new Dictionary<uint256, AnnotatedTransaction>();
 
-            List<TrackedTransaction> removedTransactions = new List<TrackedTransaction>();
+            List<TrackedTransaction> ignoredTransactions = new List<TrackedTransaction>();
 
-            foreach (var trackedTx in sortedTrackedTransactions.Where(t => t.BlockHash != null).ToList())
-            {
-                if (headerChain.TryGetHeight(trackedTx.BlockHash, out var height))
-                {
-                    // Let's remove transactions which are immature (coinbase without 101 conf
-                    if (trackedTx.Transaction.IsCoinBase)
-                    {
-                        var confs = headerChain.Height - height + 1;
-                        if (confs < 101)
-                            // This tx will be eventually spendable, let's not remove from DB
-                            sortedTrackedTransactions.Remove(trackedTx);
-                    }
-                }
-                else
-                {
-                    // Let's remove transactions which are confirmed in orphan block
-                    sortedTrackedTransactions.Remove(trackedTx);
-                    removedTransactions.Add(trackedTx);
-                }
-            }
-             // Let's remove unconf transactions who appear both conf and unconf
-            foreach (var trackedTx in sortedTrackedTransactions.Where(t => t.BlockHash != null).ToList())
-            {
-                if(trackedTransactions.TryRemove((null, trackedTx.Transaction.GetHash()), out var removed))
-                {
-                    sortedTrackedTransactions.Remove(removed);
-                    removedTransactions.Add(removed);
-                }
-            }
-            // Let's remove conflict among unconf transactions
-            retry:
-            Dictionary<OutPoint, TrackedTransaction> spent = new Dictionary<OutPoint, TrackedTransaction>();
-            foreach (var trackedTx in sortedTrackedTransactions.Where(t => t.BlockHash == null).ToList())
-            {
-                foreach (var input in trackedTx.Transaction.Inputs)
-                {
-                    var hasConflict = !spent.TryAdd(input.PrevOut, trackedTx);
-                    if (hasConflict)
-                    {
-                        var conflictedTx = spent[input.PrevOut];
-                        if (conflictedTx.Timestamp < trackedTx.Timestamp)
-                        {
-                            // trackedTx is younger, let's remove the conflictedTx from the list and start over
-                            sortedTrackedTransactions.Remove(conflictedTx);
-                            removedTransactions.Add(conflictedTx);
-                            goto retry;
-                        }
-                    }
-                }
-            }
+            // Let's remove the dups and let's get the current height of the transactions
+			foreach (var trackedTx in trackedTransactions.Values)
+			{
+				int? txHeight = null;
+				bool isMature = true;
+
+				if (trackedTx.BlockHash != null && headerChain.TryGetHeight(trackedTx.BlockHash, out var height))
+				{
+					txHeight = height;
+					isMature = trackedTx.Transaction.IsCoinBase ? headerChain.Height - height >= network.Consensus.CoinbaseMaturity : true;
+				}
+
+				var annotatedTransaction = new AnnotatedTransaction(txHeight, trackedTx, isMature);
+				if (_TxById.TryGetValue(trackedTx.Transaction.GetHash(), out var conflicted))
+				{
+					if (ShouldReplace(annotatedTransaction, conflicted))
+					{
+						ignoredTransactions.Add(conflicted.TrackedTransaction);
+						_TxById.Remove(trackedTx.Transaction.GetHash());
+						_TxById.Add(trackedTx.Transaction.GetHash(), annotatedTransaction);
+					}
+					else
+					{
+						ignoredTransactions.Add(annotatedTransaction.TrackedTransaction);
+					}
+				}
+				else
+				{
+					_TxById.Add(trackedTx.Transaction.GetHash(), annotatedTransaction);
+				}
+			}
+
+            // Let's resolve the double spents
+			Dictionary<OutPoint, uint256> spentBy = new Dictionary<OutPoint, uint256>();
+			foreach (var annotatedTransaction in _TxById.Values.Where(r => r.Height is int))
+			{
+				foreach (var spent in annotatedTransaction.TrackedTransaction.SpentOutpoints)
+				{
+					// No way to have double spent in confirmed transactions
+					spentBy.Add(spent, annotatedTransaction.TrackedTransaction.TransactionHash);
+				}
+			}
+
+            List<AnnotatedTransaction> replacedTransactions = new List<AnnotatedTransaction>();
+            removeConflicts:
+			HashSet<uint256> conflicts = new HashSet<uint256>();
+			foreach (var annotatedTransaction in _TxById.Values.Where(r => r.Height is null))
+			{
+				foreach (var spent in annotatedTransaction.TrackedTransaction.SpentOutpoints)
+				{
+					if (spentBy.TryGetValue(spent, out var conflictHash) &&
+						_TxById.TryGetValue(conflictHash, out var conflicted))
+					{
+						if (conflicted == annotatedTransaction)
+							goto nextTransaction;
+						if (conflicts.Contains(conflictHash))
+						{
+							spentBy.Remove(spent);
+							spentBy.Add(spent, annotatedTransaction.TrackedTransaction.TransactionHash);
+						}
+						else if (ShouldReplace(annotatedTransaction, conflicted))
+						{
+							conflicts.Add(conflictHash);
+							spentBy.Remove(spent);
+							spentBy.Add(spent, annotatedTransaction.TrackedTransaction.TransactionHash);
+
+							if (conflicted.Height is null && annotatedTransaction.Height is null)
+							{
+								replacedTransactions.Add(conflicted);
+							}
+							else
+							{
+								ignoredTransactions.Add(conflicted.TrackedTransaction);
+							}
+						}
+						else
+						{
+							conflicts.Add(annotatedTransaction.TrackedTransaction.TransactionHash);
+							if (conflicted.Height is null && annotatedTransaction.Height is null)
+							{
+								replacedTransactions.Add(annotatedTransaction);
+							}
+							else
+							{
+								ignoredTransactions.Add(annotatedTransaction.TrackedTransaction);
+							}
+						}
+					}
+					else
+					{
+						spentBy.Add(spent, annotatedTransaction.TrackedTransaction.TransactionHash);
+					}
+				}
+			nextTransaction:;
+			}
+
+			foreach (var e in conflicts)
+				_TxById.Remove(e);
+			if (conflicts.Count != 0)
+				goto removeConflicts;
 
             // Let's clean the removed transactions so they don't appear during next request
-            foreach (var removed in removedTransactions)
+            foreach (var removed in conflicts)
             {
-                trackedTransactions.Remove((removed.BlockHash, removed.Transaction.GetHash()), out _);
+                trackedTransactions.Remove(removed, out _);
             }
 
             // Topological sort
-            sortedTrackedTransactions = sortedTrackedTransactions.TopologicalSort(
-                            getKey: t => t.Transaction.GetHash(),
-                            dependsOn: t => t.Transaction.Inputs.Select(i => i.PrevOut.Hash).ToArray()).ToList();
+            var sortedTrackedTransactions = _TxById.Values.TopologicalSort(
+                dependsOn: t => t.TrackedTransaction.SpentOutpoints.Select(o => o.Hash), 
+                getKey: t => t.TrackedTransaction.TransactionHash);
 
             // Calculate the UTXO set
+            var utxos = new Dictionary<OutPoint, (KeyPath KeyPath, Coin Coin)>();
             foreach (var trackedTx in sortedTrackedTransactions)
             {
-                System.Console.WriteLine("Processing " + trackedTx.Transaction.GetHash() + " " + trackedTx.BlockHash);
-                 if (!trackedTx.Transaction.IsCoinBase)
+                 
+                foreach (var spent in trackedTx.TrackedTransaction.SpentOutpoints)
                 {
-                    foreach (var input in trackedTx.Transaction.Inputs)
-                    {
-                        utxos.Remove(input.PrevOut);
-                    }
+                    utxos.Remove(spent);
                 }
-                foreach (var output in trackedTx.Transaction.Outputs.AsCoins())
+                
+                foreach (var output in trackedTx.TrackedTransaction.Transaction.Outputs.AsCoins())
                 {
                     if(trackedAddresses.TryGetValue(output.ScriptPubKey, out var trackedAddress))
                     {
@@ -828,6 +892,23 @@ namespace NBitcoinTraining
                 }
             }
             return utxos.Values.ToArray();
+        }
+
+        private bool ShouldReplace(AnnotatedTransaction annotatedTransaction, AnnotatedTransaction conflicted)
+        {
+            	if (annotatedTransaction.Height is int &&
+				conflicted.Height is null)
+			{
+				return true;
+			}
+			else if (annotatedTransaction.Height is null &&
+					 conflicted.Height is null &&
+					 annotatedTransaction.TrackedTransaction.Timestamp > conflicted.TrackedTransaction.Timestamp)
+			{
+				return true;
+			}
+
+			return false;
         }
 
         public void SendToAddress(BitcoinAddress address, Money amount)
@@ -852,11 +933,13 @@ namespace NBitcoinTraining
                 listener.ReceivePayload<PongPayload>();
             }
             System.Console.WriteLine($"TX Created {tx.GetHash()}");
-            trackedTransactions.TryAdd((null, tx.GetHash()), new TrackedTransaction()
+            var trackedTx = new TrackedTransaction()
             {
                Timestamp = DateTimeOffset.UtcNow,
-               Transaction = tx
-            });
+               Transaction = tx,
+               TransactionHash = tx.GetHash()
+            };
+            trackedTransactions.TryAdd(trackedTx.TransactionHash, trackedTx);
         }
 
         public Money GetBalance()
@@ -886,31 +969,58 @@ namespace NBitcoinTraining
 {
     public static class TopologicalSortExtensions
     {
-        public static IEnumerable<T> TopologicalSort<T, TDepend>(this IEnumerable<T> nodes,
-                                                Func<T, TDepend> getKey,
-												Func<T, IEnumerable<TDepend>> dependsOn)
-        {
-            List<T> result = new List<T>();
-            var allKeys = nodes.Select(n => getKey(n));
+		public static ICollection<T> TopologicalSort<T>(this ICollection<T> nodes, Func<T, IEnumerable<T>> dependsOn)
+		{
+			return nodes.TopologicalSort(dependsOn, k => k, k => k);
+		}
+
+		public static ICollection<T> TopologicalSort<T, TDepend>(this ICollection<T> nodes, Func<T, IEnumerable<TDepend>> dependsOn, Func<T, TDepend> getKey)
+		{
+			return nodes.TopologicalSort(dependsOn, getKey, o => o);
+		}
+
+		public static ICollection<TValue> TopologicalSort<T, TDepend, TValue>(this ICollection<T> nodes,
+												Func<T, IEnumerable<TDepend>> dependsOn,
+												Func<T, TDepend> getKey,
+												Func<T, TValue> getValue)
+		{
+			if (nodes.Count == 0)
+				return Array.Empty<TValue>();
+			if (getKey == null)
+				throw new ArgumentNullException(nameof(getKey));
+			if (getValue == null)
+				throw new ArgumentNullException(nameof(getValue));
+			List<TValue> result = new List<TValue>(nodes.Count);
+			HashSet<TDepend> allKeys = new HashSet<TDepend>(nodes.Count);
+			foreach (var node in nodes)
+				allKeys.Add(getKey(node));
 			var elems = nodes.ToDictionary(node => node,
 										   node => new HashSet<TDepend>(dependsOn(node).Where(n => allKeys.Contains(n))));
-			while(elems.Count > 0)
+			var elem = elems.FirstOrDefault(x => x.Value.Count == 0);
+			if (elem.Key == null)
 			{
-				var elem = elems.FirstOrDefault(x => x.Value.Count == 0);
-				if(elem.Key == null)
-				{
-					//cycle detected can't order
-					return nodes;
-				}
+				throw new InvalidOperationException("Impossible to topologically sort a cyclic graph");
+			}
+			while (elems.Count > 0)
+			{
 				elems.Remove(elem.Key);
-				foreach(var selem in elems)
+				result.Add(getValue(elem.Key));
+				KeyValuePair<T, HashSet<TDepend>>? nextElement = null;
+				foreach (var selem in elems)
 				{
 					selem.Value.Remove(getKey(elem.Key));
+					if (selem.Value.Count == 0)
+						nextElement = selem;
 				}
-				result.Add(elem.Key);
+				if (nextElement is KeyValuePair<T, HashSet<TDepend>> n)
+					elem = n;
+				else if (elems.Count != 0)
+				{
+					throw new InvalidOperationException("Impossible to topologically sort a cyclic graph");
+				}
 			}
 			return result;
-        }
+		}
     }
 }
 ```
