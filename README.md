@@ -1270,3 +1270,5 @@ Here is an example of refactoring where I replace the hard coded `Network.Mainne
 ```
 
 The `Network` class contains network specific information about the crypto currency you are using. `network.Consensus` also gather useful information.
+
+In the rest of this book, we might hard code `Network.RegTest`, but keep in mind that you can substitute any example with another network instance from another crypto currency.
