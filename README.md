@@ -891,6 +891,12 @@ namespace NBitcoinTraining
                     }
                 }
             }
+
+            // Remove all ignored transaction from the datase
+            foreach (var ignored in ignoredTransactions)
+            {
+                trackedTransactions.Remove(ignored.TransactionHash, out _);
+            }
             return utxos.Values.ToArray();
         }
 
@@ -1050,5 +1056,9 @@ NBXplorer add more on top of it:
 * Connect via RPC to broadcast transaction instead of using the P2P protocol like this example
 * Connect via RPC to your trusted node to get the proper fee rate.
 * Altcoin support
+* Huge test suite
+* Pruning of transaction data (in practice, we don't need to save the whole transaction, only the spent outpoint and received coin for the wallet)
+* Multi-wallet
+* Flexible address generation schemes (multisig, segwit, legacy etc...)
 
-But all of this can be developped with pure .NET skills and do not involve NBitcoin knowledge, so we won't cover it. We will see about Altcoin support later on.
+But all of this can be developped with pure .NET skills and do not involve `NBitcoin` knowledge, so we won't cover it. We will see about Altcoin support later on.
