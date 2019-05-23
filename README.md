@@ -9,6 +9,7 @@ This repository contains the documentation of how to use NBitcoin is various sit
 * [Debugging with Source Link](Debugging.md)
 * [Using Bitcoin RPC](RPC.md)
 * [Use NBitcoin with Altcoins](Altcoins.md)
+* [JSON Serialization](JSON.md)
 
 ## NBitcoin advanced
 
