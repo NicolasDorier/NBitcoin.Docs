@@ -12,5 +12,7 @@ This repository contains the documentation of how to use NBitcoin is various sit
 
 ## NBitcoin advanced
 
+* [Connection via the P2P protocol](P2P.md)
+* [Using Tor](Tor.md)
 * [Wallet Design](WalletDesign.md)
     * [Advanced Wallet Design](AdvancedWalletDesign.md)
