@@ -191,5 +191,3 @@ Output:
 ```
 SlimChain height: 101
 ```
-
-Encapsulating your logic into a Behavior can have advantages, as you can then leverage NBitcoin to automatically reconnect to an unreliable node as we will see in [Advanced Wallet Design](AdvancedWalletDesign.md), or to maintain connection to a group of node on which you want to attach the same behaviors.
