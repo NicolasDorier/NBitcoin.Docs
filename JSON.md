@@ -93,4 +93,4 @@ namespace NBitcoinTraining
 }
 ```
 
-All bitcoin primitive type can easily be deserialized that way. This mean you don't need to write any dump mapping code or validation code to parse your JSON objects.
+All bitcoin primitive type can easily be deserialized that way. This mean you don't need to write any dump mapping code or validation code to parse or generate your JSON objects.
