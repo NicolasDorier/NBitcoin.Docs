@@ -10,7 +10,8 @@
 
 ## NBitcoin advanced
 
-* [Connection via the P2P protocol](P2P.md)
-* [Using Tor](Tor.md)
+* [Connect to your own node via the P2P protocol](P2P.md)
+    * [Using Tor](P2P.md#using-tor)
+    * [Node behaviors](P2P.md#node-behaviors)
 * [Wallet Design](WalletDesign.md)
     * [Advanced Wallet Design](AdvancedWalletDesign.md)
