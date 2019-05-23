@@ -19,7 +19,7 @@ Because we have all the transactions of Alice, it can reconstruct the UTXO set o
 
 If a transaction was spotted in a block, and that this block is not part of the main chain anymore (reorg), NBXplorer will remove this transaction from the list.
 
-From the resulting list of transaction you can easily build this transaction graph:
+From the resulting list of transactions you can easily build this transaction graph:
 
 * A green dot is an output.
 * A gray rectangle is a transaction.
@@ -76,7 +76,7 @@ index 144a0a3..9bd1b84 100644
                  var bobRPC = bob.CreateRPCClient();
                  var bobAddress = bobRPC.GetNewAddress();
 
-                 Console.WriteLine("Alice get money from miner");
+                 Console.WriteLine("Alice gets money from miner");
 -                var aliceAddress = aliceRPC.GetNewAddress();
 +                var aliceAddress = aliceWallet.GetNewAddress();
                  minerRPC.SendToAddress(aliceAddress, Money.Coins(20m));
@@ -146,7 +146,7 @@ namespace NBitcoinTraining
                 var bobRPC = bob.CreateRPCClient();
                 var bobAddress = bobRPC.GetNewAddress();
 
-                Console.WriteLine("Alice get money from miner");
+                Console.WriteLine("Alice gets money from miner");
                 var aliceAddress = aliceWallet.GetNewAddress();
                 minerRPC.SendToAddress(aliceAddress, Money.Coins(20m));
 
@@ -591,7 +591,7 @@ namespace NBitcoinTraining
 And our output is as expected:
 
 ```
-Alice get money from miner
+Alice gets money from miner
 Mine a block and check that alice is now synched with the miner (same block height)
 Received TX 60ec882fb997437af4d8301d050f7c00976aa3362382f5ec1e45c8261164e1e5 confirmed
 Alice Balance: 20.00000000

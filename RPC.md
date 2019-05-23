@@ -44,7 +44,7 @@ namespace NBitcoinTraining
                 var bobRPC = bob.CreateRPCClient();
                 var bobAddress = bobRPC.GetNewAddress();
 
-                Console.WriteLine("Alice get money from miner");
+                Console.WriteLine("Alice gets money from miner");
                 var aliceAddress = aliceRPC.GetNewAddress();
                 minerRPC.SendToAddress(aliceAddress, Money.Coins(20m));
 
@@ -75,7 +75,7 @@ This will output the following:
 Created 3 nodes (alice, bob, miner)
 Connect nodes to each other
 Generate 101 blocks so miner can spend money
-Alice get money from miner
+Alice gets money from miner
 Mine a block and check that alice is now synched with the miner (same block height)
 Alice Balance: 20.00000000
 Alice send 1 BTC to bob
@@ -87,6 +87,6 @@ Bob Balance: 1.00000000
 We encourage you to run this example several time, try to play with the code.
 One trick you will often see is that when `Alice` send money to Bob, she mines her own transaction and make sure Bob is aware of this block.
 
-This is done this way because when Alice create a transaction, it would take time to propagate to `Bob`, so we would need to put some sleep in the code. Instead, we just get `Alice` to mine her own transaction and make sure `Bob` received it. Then we can be sure the balance has been updated.
+This is done this way because when Alice creates a transaction, it would take time to propagate to `Bob`, so we would need to put some sleep in the code. Instead, we just get `Alice` to mine her own transaction and make sure `Bob` received it. Then we can be sure the balance has been updated.
 
 You will use this trick a lot during your development.

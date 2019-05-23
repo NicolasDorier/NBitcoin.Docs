@@ -121,7 +121,7 @@ namespace NBitcoinTraining
                 var bobRPC = bob.CreateRPCClient();
                 var bobAddress = bobRPC.GetNewAddress();
 
-                Console.WriteLine("Alice get money from miner");
+                Console.WriteLine("Alice gets money from miner");
                 var aliceKey = new Key();
                 var aliceAddress = aliceKey.PubKey.GetAddress(Network.RegTest);
                 var minerToAliceTxId = minerRPC.SendToAddress(aliceAddress, Money.Coins(20m));
@@ -180,7 +180,7 @@ Output:
 Created 3 nodes (alice, bob, miner)
 Connect nodes to each other
 Generate enough blocks so miner can spend money
-Alice get money from miner
+Alice gets money from miner
 Mine a block and check that alice is now synched with the miner (same block height)
 Alice Balance: 20.00000000 LTC
 Alice send 1 LTC to bob

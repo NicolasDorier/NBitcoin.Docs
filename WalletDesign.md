@@ -1,7 +1,7 @@
 # Alice sends through Bob without RPC
 
 In the previous section, we saw how `Alice` can send to `Bob` with the `NBitcoin.TestFramework` library.
-This is all well and good, but in many cases, Bitcoin RPC can be very limited and inflexible in term of feature.
+This is all well and good, but in many cases, Bitcoin RPC can be very limited and inflexible in terms of features.
 
 So let's try to achieve the same goal as in the previous chapter, but this time, without using RPC on Alice's side.
 
@@ -42,7 +42,7 @@ index 144a0a3..b9b4983 100644
                  var bobRPC = bob.CreateRPCClient();
                  var bobAddress = bobRPC.GetNewAddress();
 
-                 Console.WriteLine("Alice get money from miner");
+                 Console.WriteLine("Alice gets money from miner");
 -                var aliceAddress = aliceRPC.GetNewAddress();
 -                minerRPC.SendToAddress(aliceAddress, Money.Coins(20m));
 +                var aliceKey = new Key();
@@ -140,7 +140,7 @@ namespace NBitcoinTraining
                 var bobRPC = bob.CreateRPCClient();
                 var bobAddress = bobRPC.GetNewAddress();
 
-                Console.WriteLine("Alice get money from miner");
+                Console.WriteLine("Alice gets money from miner");
                 var aliceKey = new Key();
                 var aliceAddress = aliceKey.PubKey.GetAddress(Network.RegTest);
                 var minerToAliceTxId = minerRPC.SendToAddress(aliceAddress, Money.Coins(20m));
@@ -199,7 +199,7 @@ The output is basically the same as the previous chapter.
 Created 3 nodes (alice, bob, miner)
 Connect nodes to each other
 Generate 101 blocks so miner can spend money
-Alice get money from miner
+Alice gets money from miner
 Mine a block and check that alice is now synched with the miner (same block height)
 Alice Balance: 20.00000000
 Alice send 1 BTC to bob
