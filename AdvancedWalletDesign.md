@@ -299,19 +299,6 @@ namespace NBitcoinTraining
             return false;
         }
 
-        class AnnotatedTransaction
-        {
-            public AnnotatedTransaction(int? height, TrackedTransaction transaction, bool isMature)
-            {
-                Height = height;
-                TrackedTransaction = transaction;
-                IsMature = isMature;
-            }
-            public int? Height { get; set; }
-            public TrackedTransaction TrackedTransaction { get; set; }
-            public bool IsMature { get; set; }
-        }
-
         (KeyPath KeyPath, Coin Coin)[] GetUTXOs()
         {
             var transactionsById = new Dictionary<uint256, AnnotatedTransaction>();
@@ -426,9 +413,7 @@ namespace NBitcoinTraining
             }
 
             // Topological sort
-            var sortedTrackedTransactions = transactionsById.Values.TopologicalSort(
-                dependsOn: t => t.TrackedTransaction.SpentOutpoints.Select(o => o.Hash), 
-                getKey: t => t.TrackedTransaction.TransactionHash);
+            var sortedTrackedTransactions = transactionsById.Values.TopologicalSort();
 
             // Calculate the UTXO set
             var utxos = new Dictionary<OutPoint, (KeyPath KeyPath, Coin Coin)>();
@@ -518,6 +503,19 @@ namespace NBitcoinTraining
             return address;
         }
     }
+
+    class AnnotatedTransaction
+    {
+        public AnnotatedTransaction(int? height, TrackedTransaction transaction, bool isMature)
+        {
+            Height = height;
+            TrackedTransaction = transaction;
+            IsMature = isMature;
+        }
+        public int? Height { get; set; }
+        public TrackedTransaction TrackedTransaction { get; set; }
+        public bool IsMature { get; set; }
+    }
 }
 ```
 
@@ -532,59 +530,144 @@ namespace NBitcoinTraining
 {
     public static class TopologicalSortExtensions
     {
-		public static ICollection<T> TopologicalSort<T>(this ICollection<T> nodes, Func<T, IEnumerable<T>> dependsOn)
+	    public static ICollection<AnnotatedTransaction> TopologicalSort(this ICollection<AnnotatedTransaction> transactions)
+		{
+			return transactions.TopologicalSort(
+				dependsOn: t => t.TrackedTransaction.SpentOutpoints.Select(o => o.Hash), 
+                getKey: t => t.TrackedTransaction.TransactionHash
+				getValue: t => t,
+				solveTies: AnnotatedTransactionComparer.OldToYoung);
+		}
+		public static List<T> TopologicalSort<T>(this ICollection<T> nodes, Func<T, IEnumerable<T>> dependsOn)
 		{
 			return nodes.TopologicalSort(dependsOn, k => k, k => k);
 		}
 
-		public static ICollection<T> TopologicalSort<T, TDepend>(this ICollection<T> nodes, Func<T, IEnumerable<TDepend>> dependsOn, Func<T, TDepend> getKey)
+		public static List<T> TopologicalSort<T, TDepend>(this ICollection<T> nodes, Func<T, IEnumerable<TDepend>> dependsOn, Func<T, TDepend> getKey)
 		{
 			return nodes.TopologicalSort(dependsOn, getKey, o => o);
 		}
 
-		public static ICollection<TValue> TopologicalSort<T, TDepend, TValue>(this ICollection<T> nodes,
+		public static List<TValue> TopologicalSort<T, TDepend, TValue>(this ICollection<T> nodes,
 												Func<T, IEnumerable<TDepend>> dependsOn,
 												Func<T, TDepend> getKey,
-												Func<T, TValue> getValue)
+												Func<T, TValue> getValue,
+												IComparer<T> solveTies = null)
 		{
 			if (nodes.Count == 0)
-				return Array.Empty<TValue>();
+				return new List<TValue>();
 			if (getKey == null)
 				throw new ArgumentNullException(nameof(getKey));
 			if (getValue == null)
 				throw new ArgumentNullException(nameof(getValue));
+			solveTies = solveTies ?? Comparer<T>.Default;
 			List<TValue> result = new List<TValue>(nodes.Count);
 			HashSet<TDepend> allKeys = new HashSet<TDepend>(nodes.Count);
+			var noDependencies = new SortedDictionary<T, HashSet<TDepend>>(solveTies);
+
 			foreach (var node in nodes)
 				allKeys.Add(getKey(node));
-			var elems = nodes.ToDictionary(node => node,
+			var dependenciesByValues = nodes.ToDictionary(node => node,
 										   node => new HashSet<TDepend>(dependsOn(node).Where(n => allKeys.Contains(n))));
-			var elem = elems.FirstOrDefault(x => x.Value.Count == 0);
-			if (elem.Key == null)
+			foreach (var e in dependenciesByValues.Where(x => x.Value.Count == 0))
+			{
+				noDependencies.Add(e.Key, e.Value);
+			}
+			if (noDependencies.Count == 0)
 			{
 				throw new InvalidOperationException("Impossible to topologically sort a cyclic graph");
 			}
-			while (elems.Count > 0)
+			while (noDependencies.Count > 0)
 			{
-				elems.Remove(elem.Key);
-				result.Add(getValue(elem.Key));
-				KeyValuePair<T, HashSet<TDepend>>? nextElement = null;
-				foreach (var selem in elems)
+				var nodep = noDependencies.First();
+				noDependencies.Remove(nodep.Key);
+				dependenciesByValues.Remove(nodep.Key);
+
+				var elemKey = getKey(nodep.Key);
+				result.Add(getValue(nodep.Key));
+				foreach (var selem in dependenciesByValues)
 				{
-					selem.Value.Remove(getKey(elem.Key));
-					if (selem.Value.Count == 0)
-						nextElement = selem;
+					if (selem.Value.Remove(elemKey) && selem.Value.Count == 0)
+						noDependencies.Add(selem.Key, selem.Value);
 				}
-				if (nextElement is KeyValuePair<T, HashSet<TDepend>> n)
-					elem = n;
-				else if (elems.Count != 0)
-				{
-					throw new InvalidOperationException("Impossible to topologically sort a cyclic graph");
-				}
+			}
+			if (dependenciesByValues.Count != 0)
+			{
+				throw new InvalidOperationException("Impossible to topologically sort a cyclic graph");
 			}
 			return result;
 		}
     }
+
+    public class AnnotatedTransactionComparer : IComparer<AnnotatedTransaction>
+	{
+		bool youngToOld;
+		AnnotatedTransactionComparer(bool youngToOld)
+		{
+			this.youngToOld = youngToOld;
+		}
+		private static readonly AnnotatedTransactionComparer _Youngness = new AnnotatedTransactionComparer(true);
+		public static AnnotatedTransactionComparer YoungToOld
+		{
+			get
+			{
+				return _Youngness;
+			}
+		}
+		private static readonly AnnotatedTransactionComparer _Oldness = new AnnotatedTransactionComparer(false);
+		public static AnnotatedTransactionComparer OldToYoung
+		{
+			get
+			{
+				return _Oldness;
+			}
+		}
+		public AnnotatedTransactionComparer Inverse()
+		{
+			return this == YoungToOld ? OldToYoung : YoungToOld;
+		}
+		public int Compare(AnnotatedTransaction a, AnnotatedTransaction b)
+		{
+			var result = CompareCore(a, b);
+			if (!youngToOld)
+				result = result * -1;
+			return result;
+		}
+		int CompareCore(AnnotatedTransaction a, AnnotatedTransaction b)
+		{
+			var txIdCompare = a.Record.TransactionHash < b.Record.TransactionHash ? -1 :
+							  a.Record.TransactionHash > b.Record.TransactionHash ? 1 : 0;
+			var seenCompare = (a.Record.FirstSeen < b.Record.FirstSeen ? 1 :
+							a.Record.FirstSeen > b.Record.FirstSeen ? -1 : txIdCompare);
+			if (a.Height is int ah)
+			{
+				// Both confirmed, tie on height then firstSeen
+				if (b.Height is int bh)
+				{
+					var heightCompare = (ah < bh ? 1 :
+						   ah > bh ? -1 : txIdCompare);
+					return ah == bh ?
+						   // same height? use firstSeen on firstSeen
+						   seenCompare :
+						   // else tie on the height
+						   heightCompare;
+				}
+				else
+				{
+					return 1;
+				}
+			}
+			else if (b.Height is int bh)
+			{
+				return -1;
+			}
+			// Both unconfirmed, tie on firstSeen
+			else
+			{
+				return seenCompare;
+			}
+		}
+	}
 }
 ```
 
