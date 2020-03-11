@@ -8,7 +8,7 @@ The design of NBitcoin respect this, for example let's adapt [the RPC example](R
 You can go back to this project, then add `NBitcoin.Altcoins` package.
 
 ```bash
-dotnet package add NBitcoin.Altcoins
+dotnet add package NBitcoin.Altcoins
 ```
 Then, here is how you can adapt to litecoin:
 ```diff
